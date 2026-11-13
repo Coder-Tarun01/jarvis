@@ -1,0 +1,54 @@
+name: jarvis
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: jarvis-backend:local
+    init: true
+    env_file:
+      - .env
+    environment:
+      # Absolute in-container paths: the app resolves relative paths against
+      # /app, and these keep SQLite + the file sandbox on the bind mounts.
+      DATA_DIR: /app/data
+      WORKSPACE_DIR: /app/workspace
+      PERSONA_PATH: /app/persona.md
+    volumes:
+      - ./data:/app/data
+      - ./workspace:/app/workspace
+      - ./persona.md:/app/persona.md:ro
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: jarvis-frontend:local
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

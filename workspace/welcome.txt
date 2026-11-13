@@ -1,0 +1,15 @@
+JARVIS workspace
+================
+
+Everything in this folder is readable by the assistant through the
+`list_workspace_files`, `read_workspace_file` and `search_workspace_files` tools.
+
+The file tools are sandboxed here: a path that resolves outside this folder
+(../, absolute paths, symlinks pointing out) is rejected.
+
+Drop notes, transcripts or CSVs here and ask things like:
+  "Read welcome.txt and summarise it."
+  "Search the workspace for 'invoice'."
+
+Commands run by the `run_command` tool execute with this folder as their
+working directory.

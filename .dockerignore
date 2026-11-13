@@ -1,0 +1,47 @@
+# Keep the build context small and platform-clean.
+# Critically: host node_modules/.venv must never reach the Linux build.
+
+# --- secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+
+# --- python ---
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+backend/_testdata*/
+_testdata/
+_testworkspace/
+
+# --- node ---
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+
+# --- runtime data: never bake the database into an image ---
+data/
+backend/data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# --- tooling / scratch ---
+.git/
+.gitignore
+_*.ps1
+_*.py
+_*.txt
+_*.log
+README.md
+docker-compose.yml
+run.ps1
+run.sh

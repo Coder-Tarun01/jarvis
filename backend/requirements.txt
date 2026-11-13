@@ -1,0 +1,13 @@
+# JARVIS backend — pinned for reproducible installs (Python 3.11+)
+fastapi==0.162.5
+uvicorn==0.54.0
+websockets==17.4
+pydantic==2.14.3
+pydantic-settings==2.16.2
+SQLAlchemy==2.1.8
+openai==3.49.0
+# Optional: only needed when LLM_PROVIDER=anthropic
+anthropic==2.8.0
+httpx==0.28.1
+python-multipart==0.0.33
+python-dotenv==1.2.4

@@ -1,0 +1,43 @@
+# ---- secrets ----
+.env
+.env.local
+*.pem
+
+# ---- python ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ---- node ----
+node_modules/
+frontend/dist/
+npm-debug.log*
+yarn-error.log*
+.vite/
+
+# ---- runtime data (keep the folders, not the contents) ----
+data/*
+!data/.gitkeep
+backend/data/*
+backend/_testdata*
+_testdata/
+_testworkspace/
+*.db
+*.db-wal
+*.db-shm
+
+# ---- workspace: user files stay local ----
+workspace/*
+!workspace/.gitkeep
+!workspace/welcome.txt
+
+# ---- misc ----
+.DS_Store
+Thumbs.db
+*.log
+run.pid
