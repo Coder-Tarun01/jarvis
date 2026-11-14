@@ -99,6 +99,28 @@ and image updates.
 
 Stop with `docker compose down` (add `-v` only if you want to start from scratch).
 
+### Reach JARVIS from your phone (ngrok)
+
+One tunnel is enough: the frontend on **8080** serves the SPA *and* proxies `/api` + `/ws`.
+
+```powershell
+.\host\start-tunnel.ps1          # starts the ngrok/ngrok container on your reserved domain
+.\host\start-tunnel.ps1 -Stop    # tears it down again
+```
+
+The script reads `NGROK_AUTHTOKEN` from `.env` (it prompts with hidden input the first time and
+saves it there), prints the public URL, and talks to the agent through Docker on purpose — Windows
+Defender deletes the standalone `ngrok.exe` download, the container is untouched.
+
+On the phone: open the URL, accept ngrok's *Visit Site* prompt, paste `JARVIS_AUTH_TOKEN` at the
+login, and talk. Browser speech works because the tunnel is HTTPS (`STT_PROVIDER=browser`).
+
+Treat that URL as a remote control for this machine: `run_command` (confirmation-gated), file
+reads, WhatsApp sends and app control are all reachable through it. Keep `JARVIS_AUTH_TOKEN` long
+and random, and `-Stop` the tunnel when you are done.
+
+---
+
 ## 3. Configuration
 
 Every setting comes from `.env`. Nothing is hard-coded, and `.env` is git-ignored.
