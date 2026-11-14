@@ -231,6 +231,15 @@ Practical notes:
 - Switch back at any time by setting `LLM_PROVIDER=openai` — the OpenAI keys stay in `.env`.
 - Offline proof of the request shape (no key, no quota): `python tests/openrouter_test.py`.
 
+Verify the live path with one command — it prints the provider/model/key and then makes a real
+completion plus a real tool call:
+
+```bash
+cd backend
+python scripts/check_llm.py            # 0 ok · 2 no key · 3 key rejected · 4 bad model · 5 rate/credit
+python scripts/check_llm.py --no-tools # skip the tool probe (cheaper on a free tier)
+```
+
 ---
 
 ## 4. Project layout
@@ -251,6 +260,7 @@ tor/
 │   ├── Dockerfile
 │   ├── requirements.txt      # pinned
 │   ├── scripts/
+│   │   ├── check_llm.py      # preflight: provider, key, one real completion + tool call
 │   │   ├── google_oauth.py   # one-time refresh-token helper
 │   │   └── import_whatsapp_contacts.py # bulk alias import (contacts cache / CSV / vCard)
 │   ├── tests/

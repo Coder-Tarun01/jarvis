@@ -185,8 +185,17 @@ class LLMService:
                 "anthropic": "ANTHROPIC_API_KEY",
                 "openrouter": "OPENROUTER_API_KEY",
             }.get(self.settings.provider, "OPENAI_API_KEY")
+            hint = {
+                "openai": "create one at https://platform.openai.com/api-keys",
+                "anthropic": "create one at https://console.anthropic.com/settings/keys",
+                "openrouter": (
+                    "free keys: https://openrouter.ai/settings/keys — then run "
+                    "host\\set-openrouter-key.ps1 (or add it to .env yourself) and restart JARVIS"
+                ),
+            }.get(self.settings.provider, "")
             raise LLMNotConfigured(
-                f"{key_name} is not configured. Put it in .env and restart JARVIS."
+                f"{key_name} is not configured — {hint}. "
+                f"Check the whole path with: python scripts/check_llm.py"
             )
 
     # ------------------------------------------------------------------ turns
