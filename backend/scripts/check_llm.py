@@ -3,6 +3,8 @@
     cd backend
     python scripts/check_llm.py              # completion + one tool call (the full path)
     python scripts/check_llm.py --no-tools   # skip the tool-call probe (cheaper)
+    python scripts/check_llm.py --tools      # do actions come back as real tool calls?
+    python scripts/check_llm.py --models     # free OpenRouter models that support tools
 
 It talks to the configured provider for real (a handful of tokens on a free model),
 so it is the fastest way to tell "the key is wrong" apart from "the model has no
@@ -98,6 +100,52 @@ def list_free_models(settings) -> int:
     return OK
 
 
+TOOL_PROBES: tuple[tuple[str, str], ...] = (
+    ("open whatsapp", "open_desktop_app"),
+    ("open anti-gravity", "open_desktop_app"),
+    ("what is the time right now?", "get_datetime"),
+    ("add a task to buy milk", "add_task"),
+    ("send a whatsapp to Thamudu saying hello", "whatsapp_send_message"),
+)
+
+
+async def probe_tools(llm: LLMService) -> int:
+    """Ask for real actions and report whether a *structured* tool call came back."""
+    from app.services.persona import build_system_prompt
+    from app.tools.registry import tool_schemas
+
+    system = build_system_prompt(llm.settings)
+    tools = tool_schemas()
+    good = 0
+    print(f"\ntool-calling probes ({len(tools)} tools offered, tool_choice=auto):")
+    for prompt, expected in TOOL_PROBES:
+        try:
+            turn = await llm.stream_turn(
+                messages=[{"role": "user", "content": prompt}],
+                system=system,
+                tools=tools,
+                max_tokens=400,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ERROR {prompt!r}: {type(exc).__name__}: {str(exc)[:120]}")
+            continue
+        if turn.tool_calls:
+            names = ", ".join(call.name for call in turn.tool_calls)
+            hit = any(expected == call.name for call in turn.tool_calls)
+            good += 1
+            print(f"  ok    {prompt!r} -> {names}{'' if hit else f'  (expected {expected})'}")
+        else:
+            print(f"  warn  {prompt!r} -> NO TOOL CALL, said: {turn.text[:90]!r}")
+
+    print(f"\n{good}/{len(TOOL_PROBES)} action prompts produced a tool call")
+    if good < len(TOOL_PROBES):
+        print(
+            "text-only answers here are narration, not execution — keep the persona rules "
+            "that forbid claiming an action, or switch to a model with steadier tool use"
+        )
+    return OK if good == len(TOOL_PROBES) else OTHER
+
+
 async def probe(llm: LLMService, with_tools: bool) -> int:
     print(f"provider : {llm.provider_name}")
     print(f"model    : {llm.model}")
@@ -159,6 +207,11 @@ def main() -> int:
         action="store_true",
         help="list the free OpenRouter models that support tool calls, then exit",
     )
+    parser.add_argument(
+        "--tools",
+        action="store_true",
+        help="run the tool-calling probes (actions must come back as structured calls)",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -173,6 +226,8 @@ def main() -> int:
         return list_free_models(settings)
 
     llm = LLMService(settings)
+    if args.tools:
+        return asyncio.run(probe_tools(llm))
     return asyncio.run(probe(llm, with_tools=not args.no_tools))
 
 

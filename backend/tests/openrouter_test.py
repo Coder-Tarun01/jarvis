@@ -22,7 +22,7 @@ import openai  # noqa: E402
 
 from app.core.config import Settings  # noqa: E402
 from app.core.errors import LLMNotConfigured  # noqa: E402
-from app.services.llm import LLMService, is_retryable  # noqa: E402
+from app.services.llm import LLMService, explain_error, is_retryable  # noqa: E402
 from app.services.llm_openrouter import OpenRouterProvider  # noqa: E402
 
 MODEL = "baidu/ernie-5.5-flash-preview:free"
@@ -319,6 +319,35 @@ try:
 except Exception as exc:  # noqa: BLE001 - the point is the retry policy
     check("429 surfaces as an error", is_retryable(exc), type(exc).__name__)
     check("429 retried before giving up", retry_fake.calls == 3, str(retry_fake.calls))
+
+print("\n--- provider errors explained to the user")
+
+
+class HttpError(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status_code = status
+
+
+check(
+    "daily free cap gets a real explanation",
+    "used up" in (explain_error(HttpError(429, "Rate limit exceeded: free-models-per-day")) or ""),
+    str(explain_error(HttpError(429, "Rate limit exceeded: free-models-per-day")))[:90],
+)
+check(
+    "a plain 429 suggests waiting",
+    "wait a few seconds" in (explain_error(HttpError(429, "rate limited")) or ""),
+)
+check(
+    "401 points at the key helper",
+    "set-openrouter-key" in (explain_error(HttpError(401, "User not found")) or ""),
+)
+check(
+    "404 points at --models",
+    "--models" in (explain_error(HttpError(404, "No endpoints found")) or ""),
+)
+check("402 mentions credit", "credit" in (explain_error(HttpError(402, "no funds")) or ""))
+check("unknown errors fall through", explain_error(HttpError(500, "boom")) is None)
 
 print("")
 if failures:

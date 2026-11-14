@@ -27,6 +27,7 @@ from ..core.errors import LLMNotConfigured
 from ..core.logging import get_logger
 from ..core.utils import retry_async
 from .llm import LLMTurn, TextCallback, ToolCall, is_retryable
+from .tool_text import recover_tool_calls
 
 log = get_logger("llm.openai")
 
@@ -161,6 +162,7 @@ class OpenAIProvider:
         model: str | None,
         stream: bool,
         json_mode: bool = False,
+        tool_choice: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model or self.model,
@@ -171,7 +173,7 @@ class OpenAIProvider:
             payload["stream"] = True
         if tools:
             payload["tools"] = self.format_tools(tools)
-            payload["tool_choice"] = "auto"
+            payload["tool_choice"] = tool_choice or "auto"
         payload.update(self._extra_payload())
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
@@ -187,6 +189,7 @@ class OpenAIProvider:
         on_text: TextCallback | None = None,
         max_tokens: int | None = None,
         model: str | None = None,
+        tool_choice: str | None = None,
     ) -> LLMTurn:
         client = self._get_client()
         payload = self._payload(
@@ -196,6 +199,7 @@ class OpenAIProvider:
             max_tokens=max_tokens,
             model=model,
             stream=True,
+            tool_choice=tool_choice,
         )
 
         attempts = 3
@@ -211,7 +215,8 @@ class OpenAIProvider:
                     await on_text(piece)
 
             try:
-                return await self._stream_once(client, payload, on_delta)
+                turn = await self._stream_once(client, payload, on_delta)
+                return self._recover_textual_calls(turn, tools)
             except openai.BadRequestError as exc:
                 message = str(exc).lower()
                 if payload.get("reasoning_effort") and "reasoning_effort" in message:
@@ -271,13 +276,71 @@ class OpenAIProvider:
                     if function is not None:
                         if getattr(function, "name", None):
                             slot["name"] = function.name
-                        if getattr(function, "arguments", None):
-                            slot["arguments"] += function.arguments
+                        fragment = getattr(function, "arguments", None)
+                        if isinstance(fragment, str) and fragment:
+                            slot["arguments"] += fragment
+                        elif isinstance(fragment, dict) and fragment:
+                            # a few gateways send the object instead of a JSON string
+                            slot["arguments"] = json.dumps(fragment)
 
             if getattr(choice, "finish_reason", None):
                 finish_reason = choice.finish_reason
 
         return self._turn_from_state(text_parts, slots, finish_reason, model_name)
+
+    @staticmethod
+    def _assistant_message(text: str, calls: list[ToolCall]) -> dict[str, Any]:
+        """Assistant message exactly as the provider expects it back in history."""
+        message: dict[str, Any] = {"role": "assistant", "content": text or None}
+        if calls:
+            message["tool_calls"] = [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.name,
+                        "arguments": call.raw_arguments or json.dumps(call.input),
+                    },
+                }
+                for call in calls
+            ]
+        return message
+
+    def _recover_textual_calls(
+        self, turn: LLMTurn, tools: list[dict[str, Any]] | None
+    ) -> LLMTurn:
+        """Some free models print ``tool(arg=…)`` instead of calling it — adopt those.
+
+        Only tools offered in this request are accepted, and only when a line starts
+        with the tool name, so prose that merely mentions a tool is left alone.
+        """
+        if turn.tool_calls or not turn.text or not tools:
+            return turn
+
+        names = {str(tool.get("name")) for tool in tools if tool.get("name")}
+        calls, cleaned = recover_tool_calls(turn.text, names)
+        if not calls:
+            return turn
+
+        log.warning(
+            "model wrote %d tool call(s) as text (%s); recovered them",
+            len(calls),
+            ", ".join(name for name, _ in calls),
+        )
+        recovered = [
+            ToolCall(
+                id=f"recovered_{index}",
+                name=name,
+                input=arguments,
+                raw_arguments=json.dumps(arguments, ensure_ascii=False),
+            )
+            for index, (name, arguments) in enumerate(calls, start=1)
+        ]
+        turn.tool_calls = recovered
+        turn.text = cleaned
+        turn.stop_reason = "tool_calls"
+        turn.assistant_message = self._assistant_message(cleaned, recovered)
+        return turn
 
     @staticmethod
     def _turn_from_state(
@@ -317,23 +380,9 @@ class OpenAIProvider:
                 )
             )
 
-        assistant_message: dict[str, Any] = {"role": "assistant", "content": text or None}
-        if calls:
-            assistant_message["tool_calls"] = [
-                {
-                    "id": call.id,
-                    "type": "function",
-                    "function": {
-                        "name": call.name,
-                        "arguments": call.raw_arguments or json.dumps(call.input),
-                    },
-                }
-                for call in calls
-            ]
-
         return LLMTurn(
             text=text,
-            assistant_message=assistant_message,
+            assistant_message=OpenAIProvider._assistant_message(text, calls),
             tool_calls=calls,
             stop_reason=finish_reason,
             usage={},

@@ -50,6 +50,37 @@ def is_retryable(exc: BaseException) -> bool:
     return type(exc).__name__ in RETRYABLE_NAMES
 
 
+def explain_error(exc: BaseException) -> str | None:
+    """Turn a provider failure into a line a human can act on (None = unknown)."""
+    status = getattr(exc, "status_code", None)
+    text = str(exc)
+    lowered = text.lower()
+
+    if status == 429:
+        if "per-day" in lowered or "free-models-per-day" in lowered or "daily" in lowered:
+            return (
+                "The free OpenRouter allowance for today is used up. Add $10 of credits for "
+                "1000 free requests/day (https://openrouter.ai/settings/credits), wait for the "
+                "daily reset, or switch LLM_PROVIDER back to openai in .env and restart."
+            )
+        return "The provider is rate limiting requests — wait a few seconds and try again."
+    if status == 402:
+        return "The provider says this API key is out of credit."
+    if status == 403:
+        return "The provider blocked this request (spend limit reached, key disabled or access denied)."
+    if status == 401:
+        return (
+            "The API key was rejected — paste a fresh one with host\\set-openrouter-key.ps1 "
+            "and restart the backend."
+        )
+    if status == 404:
+        return (
+            "That model does not exist on the provider — run "
+            "'python scripts/check_llm.py --models' and put a valid id in OPENROUTER_MODEL."
+        )
+    return None
+
+
 @dataclass(slots=True)
 class ToolCall:
     """One tool invocation requested by the model."""
@@ -98,6 +129,7 @@ class Provider(Protocol):
         on_text: TextCallback | None = None,
         max_tokens: int | None = None,
         model: str | None = None,
+        tool_choice: str | None = None,
     ) -> LLMTurn: ...
 
     async def complete(
@@ -208,6 +240,7 @@ class LLMService:
         on_text: TextCallback | None = None,
         max_tokens: int | None = None,
         model: str | None = None,
+        tool_choice: str | None = None,
     ) -> LLMTurn:
         self._require()
         return await self._provider.stream_turn(
@@ -217,6 +250,7 @@ class LLMService:
             on_text=on_text,
             max_tokens=max_tokens,
             model=model,
+            tool_choice=tool_choice,
         )
 
     async def complete(

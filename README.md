@@ -240,6 +240,34 @@ python scripts/check_llm.py            # 0 ok · 2 no key · 3 key rejected · 4
 python scripts/check_llm.py --no-tools # skip the tool probe (cheaper on a free tier)
 ```
 
+#### When a free model narrates instead of acting
+
+Small free models sometimes write the call into the text channel instead of emitting a real
+`tool_calls` payload, so an action is described but never runs:
+
+```
+[used tools] open_desktop_app(app="whatsapp")
+WhatsApp's open.
+```
+
+Three defences, in order:
+
+1. **Text-channel recovery** (`services/tool_text.py`) — a line that *starts* with a tool that was
+   actually offered, followed by `(...)`, is parsed (JSON object or `key=value`) and turned into a
+   real `ToolCall`; the invented syntax is stripped from the reply. Prose that merely mentions a
+   tool is never executed.
+2. **Someone-claims-a-done-deed guard** (`core/agent.py`) — if the first turn claims an action
+   ("Opened", "Sent", "Done") for an imperative request but no tool ran, the agent asks **once**
+   more with a corrective instruction. Nothing is ever force-executed, so a question like *"what
+   did you open?"* cannot trigger a fresh action.
+3. **Last resort** — if the retry still claims success without a tool result, the reply is replaced
+   with *"I didn't actually do that…"* and the UI shows a warning, so a false success never enters
+   the transcript.
+
+`python scripts/check_llm.py --tools` measures this directly: it fires five real action prompts
+(open an app, send a WhatsApp, add a task, read the clock) and reports whether each produced a
+structured tool call.
+
 ---
 
 ## 4. Project layout
@@ -831,6 +859,7 @@ python tests/desktop_bridge_test.py  # app allowlist, approval flags, file-queue
 python tests/whatsapp_test.py     # numbers, contacts, aliases, bulk import, both delivery paths, Cloud API errors
 python tests/google_contacts_test.py  # People API request shape, pagination, matching (mocked)
 python tests/openrouter_test.py   # free-model provider: request shape, SSE tool calls, 429 backoff (mocked)
+python tests/tool_calling_test.py # narrated calls recovered, false "done" claims caught (mocked)
 ```
 
 The frontend has one plain-script test too (Node, no bundler, no browser):

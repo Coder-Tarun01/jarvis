@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
@@ -33,6 +34,59 @@ log = get_logger("agent")
 
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
 Confirmer = Callable[[str, str, dict[str, Any], str], Awaitable[bool]]
+
+#: Words that mean "the model says it already did something".
+_ACTION_CLAIM = re.compile(
+    r"\b(opened|launched|started|closed|quit|sent|messaged|texted|added|created|"
+    r"scheduled|reminded|saved|deleted|removed|updated|imported|searched|drafted|"
+    r"booked|set up|turned (?:on|off)|switched|done|finished|completed|all set)\b",
+    re.IGNORECASE,
+)
+#: Polite lead-ins in front of an instruction: "can you open …", "jarvis, please add …"
+_POLITE_LEAD = re.compile(
+    r"^(?:hey\s+|ok\s+|yo\s+)?(?:jarvis\b[,:]?\s*)?(?:please\s+)?"
+    r"(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?",
+    re.IGNORECASE,
+)
+#: Verbs that make a sentence an instruction rather than a question.
+_ACTION_VERBS = {
+    "open", "launch", "start", "run", "close", "quit", "kill", "stop",
+    "send", "message", "text", "whatsapp", "mail", "email", "draft",
+    "add", "create", "new", "schedule", "remind", "set", "save",
+    "delete", "remove", "update", "rename", "import", "export",
+    "search", "find", "look", "google", "read", "show", "list",
+    "turn", "switch", "play", "write", "note", "remember", "sync",
+}
+
+
+def asks_for_action(text: str) -> bool:
+    """True when the message *instructs* the assistant to do something.
+
+    Questions are excluded on purpose: "what did you open?" must not trigger a
+    corrective turn that could make the model run a fresh action.
+    """
+    cleaned = " ".join((text or "").split())
+    if not cleaned:
+        return False
+    lead = _POLITE_LEAD.match(cleaned)
+    remainder = cleaned[lead.end():] if lead else cleaned
+    head = (remainder.split(maxsplit=1) or [""])[0].strip(".,!?;:").lower()
+    return head in _ACTION_VERBS
+
+
+#: Sent once, when a turn claimed an action without calling a tool.
+CORRECTION = """## Correction
+Your previous reply described an action but no tool ran, so nothing happened.
+If the user asked you to do something, call the matching tool now with its arguments.
+If it was only a question, answer it plainly without claiming any action.
+Never write tool calls as text (no "[used tools] ..."), and never say you did
+something unless a tool result confirms it."""
+
+#: Last resort: keep a false success out of the transcript.
+UNVERIFIED_REPLY = (
+    "I didn't actually do that — I answered without calling a tool, so nothing "
+    "changed. Ask me again and I'll run it for real."
+)
 
 
 def title_from(text: str) -> str:
@@ -102,11 +156,15 @@ class Agent:
         await emit({"type": "state", "state": "thinking"})
         tool_notes: list[dict[str, Any]] = []
         final_text = ""
+        corrective = False
+        corrective_used = False
 
         for iteration in range(1, settings.max_tool_iterations + 1):
+            current_system = system + ("\n\n" + CORRECTION if corrective else "")
+            corrective = False
             turn = await self.llm.stream_turn(
                 messages=history,
-                system=system,
+                system=current_system,
                 tools=tools,
                 on_text=self._token_emitter(emit),
             )
@@ -120,6 +178,32 @@ class Agent:
                     log.warning(
                         "model returned an empty turn (stop_reason=%s)", turn.stop_reason
                     )
+                    break
+
+                # A small/free model can *narrate* an action instead of calling a tool
+                # ("Opened, boss"). Give it exactly one chance to correct itself, then
+                # refuse to leave a false success in the transcript.
+                if (
+                    iteration == 1
+                    and tools
+                    and not corrective_used
+                    and _ACTION_CLAIM.search(turn.text)
+                    and asks_for_action(user_text)
+                ):
+                    log.warning(
+                        "first turn claimed an action without a tool call; asking once for the tool"
+                    )
+                    if turn.assistant_message and history and history[-1] is turn.assistant_message:
+                        history.pop()  # do not feed the claim back to the model
+                    corrective_used = True
+                    corrective = True
+                    await emit({"type": "state", "state": "thinking"})
+                    continue
+
+                if corrective_used and not tool_notes and _ACTION_CLAIM.search(turn.text):
+                    log.warning("still no tool call after the correction; replacing the claim")
+                    final_text = UNVERIFIED_REPLY
+                    await emit({"type": "warning", "message": UNVERIFIED_REPLY})
                 break
 
             log.info("iteration %s: %s tool call(s)", iteration, len(turn.tool_calls))

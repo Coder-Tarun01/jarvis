@@ -28,6 +28,7 @@ from ..core.logging import get_logger
 from ..core.models import Conversation
 from ..core.security import websocket_authorized
 from ..services.hub import hub
+from ..services.llm import explain_error
 
 router = APIRouter()
 log = get_logger("api.chat")
@@ -147,7 +148,7 @@ async def chat_socket(websocket: WebSocket) -> None:
             await emit({"type": "state", "state": "idle"})
         except Exception as exc:  # noqa: BLE001
             log.exception("turn failed")
-            await emit({"type": "error", "message": f"Something went wrong: {exc}"})
+            await emit({"type": "error", "message": explain_error(exc) or f"Something went wrong: {exc}"})
             await emit({"type": "state", "state": "idle"})
         finally:
             db.close()
