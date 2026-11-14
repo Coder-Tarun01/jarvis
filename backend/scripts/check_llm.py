@@ -50,7 +50,9 @@ def explain(exc: BaseException) -> tuple[int, str]:
         return AUTH, "the API key was rejected (401) — delete it and paste it again"
     if isinstance(exc, openai.NotFoundError) or status == 404:
         return NO_MODEL, (
-            "unknown model, or no provider serves it (404) — check OPENROUTER_MODEL / OPENAI_MODEL"
+            "unknown model, or no provider serves it (404) — check OPENROUTER_MODEL / "
+            "OPENAI_MODEL; 'python scripts/check_llm.py --models' lists the free ones "
+            "(note the ':free' suffix)"
         )
     if isinstance(exc, openai.RateLimitError) or status == 429:
         return LIMIT, "rate limited (429) — free tiers allow only a few requests per minute"
@@ -59,6 +61,41 @@ def explain(exc: BaseException) -> tuple[int, str]:
     if isinstance(exc, openai.BadRequestError) or status == 400:
         return OTHER, f"the request was rejected (400): {str(exc)[:180]}"
     return OTHER, f"{type(exc).__name__}: {str(exc)[:180]}"
+
+
+def list_free_models(settings) -> int:
+    """Print the free OpenRouter models that can call tools (model slugs change often)."""
+    import httpx
+
+    headers = (
+        {"Authorization": f"Bearer {settings.llm_api_key}"} if settings.llm_api_key else {}
+    )
+    try:
+        response = httpx.get(
+            "https://openrouter.ai/api/v1/models", headers=headers, timeout=30.0
+        )
+        response.raise_for_status()
+        data = response.json()["data"]
+    except Exception as exc:  # noqa: BLE001
+        print(f"FAIL  could not fetch the model list: {exc}")
+        return OTHER
+
+    rows = []
+    for model in data:
+        pricing = model.get("pricing") or {}
+        if str(pricing.get("prompt")) not in ("0", "0.0"):
+            continue
+        if "tools" not in (model.get("supported_parameters") or []):
+            continue
+        rows.append((model["id"], model.get("context_length") or 0))
+    rows.sort(key=lambda row: -row[1])
+
+    print(f"free models that support tool calls ({len(rows)}):")
+    for model_id, context in rows:
+        marker = "   <- configured" if model_id == settings.openrouter_model else ""
+        print(f"  {model_id:<52} ctx={context}{marker}")
+    print("\nput one of these in OPENROUTER_MODEL (the ':free' suffix is part of the id)")
+    return OK
 
 
 async def probe(llm: LLMService, with_tools: bool) -> int:
@@ -117,6 +154,11 @@ async def probe(llm: LLMService, with_tools: bool) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--no-tools", action="store_true", help="skip the tool-call probe")
+    parser.add_argument(
+        "--models",
+        action="store_true",
+        help="list the free OpenRouter models that support tool calls, then exit",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -126,6 +168,9 @@ def main() -> int:
         "openrouter": "OPENROUTER_API_KEY",
     }.get(settings.provider, "OPENAI_API_KEY")
     print(f"key      : {key_name} = {mask(settings.llm_api_key)}")
+
+    if args.models:
+        return list_free_models(settings)
 
     llm = LLMService(settings)
     return asyncio.run(probe(llm, with_tools=not args.no_tools))

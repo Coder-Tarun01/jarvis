@@ -32,7 +32,7 @@ DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 class OpenRouterProvider(OpenAIProvider):
-    """``LLM_PROVIDER=openrouter`` — e.g. ``baidu/ernie-5.5-flash-preview`` (free)."""
+    """``LLM_PROVIDER=openrouter`` — e.g. ``baidu/ernie-5.5-flash-preview:free``."""
 
     name = "openrouter"
     token_field = "max_tokens"

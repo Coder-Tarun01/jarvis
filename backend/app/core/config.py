@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     # OpenAI-compatible gateway with genuinely free models, so an exhausted
     # OpenAI quota does not take the assistant offline. Keys: openrouter.ai/settings/keys
     openrouter_api_key: str = ""
-    openrouter_model: str = "baidu/ernie-5.5-flash-preview"
+    openrouter_model: str = "baidu/ernie-5.5-flash-preview:free"
     # empty -> same as OPENROUTER_MODEL (a free model rarely has a cheaper sibling)
     openrouter_model_fast: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"

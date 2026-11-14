@@ -25,7 +25,7 @@ from app.core.errors import LLMNotConfigured  # noqa: E402
 from app.services.llm import LLMService, is_retryable  # noqa: E402
 from app.services.llm_openrouter import OpenRouterProvider  # noqa: E402
 
-MODEL = "baidu/ernie-5.5-flash-preview"
+MODEL = "baidu/ernie-5.5-flash-preview:free"
 failures = []
 
 

@@ -117,7 +117,7 @@ Every setting comes from `.env`. Nothing is hard-coded, and `.env` is git-ignore
 | `ANTHROPIC_MODEL` | `claude-sonnet-5-5` | Fallback provider's main model. |
 | `ANTHROPIC_UTILITY_MODEL` | `claude-haiku-5-5` | Fallback provider's cheap model. |
 | `OPENROUTER_API_KEY` | — | Only used when `LLM_PROVIDER=openrouter` (free models, e.g. when the OpenAI quota is spent). |
-| `OPENROUTER_MODEL` | `baidu/ernie-5.5-flash-preview` | Free chat model; must support `tools` + streaming. |
+| `OPENROUTER_MODEL` | `baidu/ernie-5.5-flash-preview:free` | Free chat model; must support `tools` + streaming. |
 | `OPENROUTER_MAX_TOKENS` | `1500` | Per-turn output cap, sent as `max_tokens` (OpenRouter rejects `max_completion_tokens`). |
 | `JARVIS_AUTH_TOKEN` | `change-me-please` | Single-user bearer token for REST **and** WebSocket. **Change it.** |
 | `CORS_ORIGINS` | `http://localhost:5173,...` | Comma-separated browser origins allowed to call the API. |
@@ -201,7 +201,7 @@ the `OpenRouterProvider`, which is the same Chat Completions client pointed at
 ```
 LLM_PROVIDER=openrouter
 OPENROUTER_API_KEY=sk-or-v1-…          # https://openrouter.ai/settings/keys
-OPENROUTER_MODEL=baidu/ernie-5.5-flash-preview
+OPENROUTER_MODEL=baidu/ernie-5.5-flash-preview:free
 OPENROUTER_MAX_TOKENS=1500
 ```
 
