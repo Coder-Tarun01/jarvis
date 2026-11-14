@@ -81,9 +81,8 @@ try {
     }
 
     $token = Get-Token
-    if (-not (Get-Process -Name docker -ErrorAction SilentlyContinue)) {
-        Write-Warning 'Docker does not look like it is running'
-    }
+    docker info 1>$null 2>$null
+    if ($LASTEXITCODE -ne 0) { throw 'Docker is not running - start Docker Desktop first' }
 
     docker run -d --name $name --restart unless-stopped `
         -e "NGROK_AUTHTOKEN=$token" `
@@ -121,7 +120,7 @@ try {
     Write-Host ''
     Write-Host 'JARVIS is reachable from anywhere:' -ForegroundColor Green
     Write-Host ("  URL   : {0}" -f $url) -ForegroundColor Green
-    Write-Host ("  token : {0}… (the value of JARVIS_AUTH_TOKEN in .env)" -f $token403.Substring(0, [Math]::Min(4, $token403.Length)))
+    Write-Host ("  token : {0}... (the value of JARVIS_AUTH_TOKEN in .env)" -f $token403.Substring(0, [Math]::Min(4, $token403.Length)))
     Write-Host ''
     Write-Host 'On the phone: open the URL, accept ngrok''s "Visit Site" prompt, paste the token, send.' -ForegroundColor Cyan
     Write-Host '  - browser speech (mic) works because the tunnel is HTTPS' -ForegroundColor DarkGray
