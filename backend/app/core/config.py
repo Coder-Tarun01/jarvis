@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # ---------- LLM ----------
-    # openai (default) | anthropic (optional fallback)
+    # openai (default) | anthropic (optional fallback) | openrouter (free-tier models)
     llm_provider: str = "openai"
 
     # --- OpenAI (default provider) ---
@@ -55,6 +55,21 @@ class Settings(BaseSettings):
     anthropic_utility_model: str = "claude-haiku-5-5"
     anthropic_max_tokens: int = 1500
     anthropic_timeout: float = 120.0
+
+    # --- OpenRouter (only used when LLM_PROVIDER=openrouter) ---
+    # OpenAI-compatible gateway with genuinely free models, so an exhausted
+    # OpenAI quota does not take the assistant offline. Keys: openrouter.ai/settings/keys
+    openrouter_api_key: str = ""
+    openrouter_model: str = "baidu/ernie-5.5-flash-preview"
+    # empty -> same as OPENROUTER_MODEL (a free model rarely has a cheaper sibling)
+    openrouter_model_fast: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_max_tokens: int = 1500
+    openrouter_timeout: float = 120.0
+    # OpenRouter attribution headers (optional, but it is how the app shows up in
+    # the model's activity rankings). Left empty -> headers are not sent.
+    openrouter_referer: str = ""
+    openrouter_title: str = "JARVIS"
 
     max_tool_iterations: int = 6
     history_limit: int = 30
@@ -213,11 +228,15 @@ class Settings(BaseSettings):
     def provider(self) -> str:
         """Active LLM provider, normalised to a supported value."""
         value = (self.llm_provider or "openai").strip().lower()
-        return value if value in ("openai", "anthropic") else "openai"
+        return value if value in ("openai", "anthropic", "openrouter") else "openai"
 
     @property
     def llm_api_key(self) -> str:
-        return self.openai_api_key if self.provider == "openai" else self.anthropic_api_key
+        if self.provider == "anthropic":
+            return self.anthropic_api_key
+        if self.provider == "openrouter":
+            return self.openrouter_api_key
+        return self.openai_api_key
 
     @property
     def llm_configured(self) -> bool:
@@ -225,25 +244,41 @@ class Settings(BaseSettings):
 
     @property
     def llm_model(self) -> str:
-        return self.openai_model if self.provider == "openai" else self.anthropic_model
+        if self.provider == "anthropic":
+            return self.anthropic_model
+        if self.provider == "openrouter":
+            return self.openrouter_model
+        return self.openai_model
 
     @property
     def llm_model_fast(self) -> str:
-        if self.provider == "openai":
-            return self.openai_model_fast or self.openai_model
-        return self.anthropic_utility_model or self.anthropic_model
+        if self.provider == "anthropic":
+            return self.anthropic_utility_model or self.anthropic_model
+        if self.provider == "openrouter":
+            return self.openrouter_model_fast or self.openrouter_model
+        return self.openai_model_fast or self.openai_model
 
     @property
     def llm_max_tokens(self) -> int:
-        return self.openai_max_tokens if self.provider == "openai" else self.anthropic_max_tokens
+        if self.provider == "anthropic":
+            return self.anthropic_max_tokens
+        if self.provider == "openrouter":
+            return self.openrouter_max_tokens
+        return self.openai_max_tokens
 
     @property
     def llm_timeout(self) -> float:
-        return self.openai_timeout if self.provider == "openai" else self.anthropic_timeout
+        if self.provider == "anthropic":
+            return self.anthropic_timeout
+        if self.provider == "openrouter":
+            return self.openrouter_timeout
+        return self.openai_timeout
 
     @property
     def llm_reasoning_effort(self) -> str:
+        # OpenAI (gpt-6.x) only: OpenRouter takes a `reasoning` object instead.
         return (self.openai_reasoning_effort or "").strip() if self.provider == "openai" else ""
+
 
     # -------------------------------------------------------------- whatsapp
     @property

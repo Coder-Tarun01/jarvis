@@ -2,8 +2,9 @@
 
 ``LLM_PROVIDER`` selects the backend:
 
-* ``openai``    (default) -> :mod:`app.services.llm_openai`
-* ``anthropic`` (optional) -> :mod:`app.services.llm_anthropic`
+* ``openai``     (default)  -> :mod:`app.services.llm_openai`
+* ``anthropic``  (optional) -> :mod:`app.services.llm_anthropic`
+* ``openrouter`` (free tier)-> :mod:`app.services.llm_openrouter`
 
 The agent and the memory extractor only talk to this module. A provider returns a
 neutral :class:`LLMTurn` (text + assistant message + tool calls) and knows how to
@@ -149,6 +150,12 @@ class LLMService:
             log.info("LLM provider: anthropic (%s)", self.settings.anthropic_model)
             return AnthropicProvider(self.settings)
 
+        if self.settings.provider == "openrouter":
+            from .llm_openrouter import OpenRouterProvider
+
+            log.info("LLM provider: openrouter (%s)", self.settings.openrouter_model)
+            return OpenRouterProvider(self.settings)
+
         from .llm_openai import OpenAIProvider
 
         log.info("LLM provider: openai (%s)", self.settings.openai_model)
@@ -173,7 +180,11 @@ class LLMService:
 
     def _require(self) -> None:
         if not self.available:
-            key_name = "OPENAI_API_KEY" if self.settings.provider == "openai" else "ANTHROPIC_API_KEY"
+            key_name = {
+                "openai": "OPENAI_API_KEY",
+                "anthropic": "ANTHROPIC_API_KEY",
+                "openrouter": "OPENROUTER_API_KEY",
+            }.get(self.settings.provider, "OPENAI_API_KEY")
             raise LLMNotConfigured(
                 f"{key_name} is not configured. Put it in .env and restart JARVIS."
             )

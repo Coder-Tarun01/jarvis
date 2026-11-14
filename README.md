@@ -105,7 +105,7 @@ Every setting comes from `.env`. Nothing is hard-coded, and `.env` is git-ignore
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `openai` | `openai` (default) or `anthropic` (optional fallback). |
+| `LLM_PROVIDER` | `openai` | `openai` (default), `anthropic` (fallback) or `openrouter` (free models). |
 | `OPENAI_API_KEY` | — | **Required for the default provider.** Also powers Whisper STT and OpenAI TTS. |
 | `OPENAI_MODEL` | `gpt-6.1-terra` | Main chat model. Must support function tools + streaming (see §3.1). |
 | `OPENAI_MODEL_FAST` | `gpt-5.4-mini` | Cheap model for background memory extraction. |
@@ -116,6 +116,9 @@ Every setting comes from `.env`. Nothing is hard-coded, and `.env` is git-ignore
 | `ANTHROPIC_API_KEY` | — | Only used when `LLM_PROVIDER=anthropic`. |
 | `ANTHROPIC_MODEL` | `claude-sonnet-5-5` | Fallback provider's main model. |
 | `ANTHROPIC_UTILITY_MODEL` | `claude-haiku-5-5` | Fallback provider's cheap model. |
+| `OPENROUTER_API_KEY` | — | Only used when `LLM_PROVIDER=openrouter` (free models, e.g. when the OpenAI quota is spent). |
+| `OPENROUTER_MODEL` | `baidu/ernie-5.5-flash-preview` | Free chat model; must support `tools` + streaming. |
+| `OPENROUTER_MAX_TOKENS` | `1500` | Per-turn output cap, sent as `max_tokens` (OpenRouter rejects `max_completion_tokens`). |
 | `JARVIS_AUTH_TOKEN` | `change-me-please` | Single-user bearer token for REST **and** WebSocket. **Change it.** |
 | `CORS_ORIGINS` | `http://localhost:5173,...` | Comma-separated browser origins allowed to call the API. |
 | `DATABASE_URL` | empty → `<data>/jarvis.db` | Any SQLAlchemy URL; SQLite by default. |
@@ -189,6 +192,45 @@ python scripts/probe_models.py
 It prints `OPENAI_MODEL` / `OPENAI_REASONING_EFFORT` / `OPENAI_MODEL_FAST` recommendations
 and never prints the key.
 
+#### Running on free models (OpenRouter)
+
+When the OpenAI quota runs out, nothing has to be re-wired: `LLM_PROVIDER=openrouter` swaps in
+the `OpenRouterProvider`, which is the same Chat Completions client pointed at
+`https://openrouter.ai/api/v1` — streaming, tool calls and the agent loop are unchanged.
+
+```
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-…          # https://openrouter.ai/settings/keys
+OPENROUTER_MODEL=baidu/ernie-5.5-flash-preview
+OPENROUTER_MAX_TOKENS=1500
+```
+
+```bash
+docker compose up -d --force-recreate backend   # .env is read at start
+```
+
+What differs from the OpenAI provider, and why:
+
+| Detail | OpenAI | OpenRouter | Why it matters |
+| --- | --- | --- | --- |
+| Output cap | `max_completion_tokens` | **`max_tokens`** | `max_completion_tokens` is an OpenAI-only field; OpenRouter rejects it |
+| Reasoning | `reasoning_effort` | **omitted** (OpenRouter takes a `reasoning` object) | free models 400 on the OpenAI spelling |
+| Usage | final chunk has `usage` | `usage: {include: true}` in the body | token counts **and `cost`** for free models |
+| Attribution | — | optional `HTTP-Referer` / `X-Title` | shows JARVIS in the model's OpenRouter rankings |
+
+Practical notes:
+
+- **Free tier is rate limited.** OpenRouter answers `429` with `Retry-After`; the shared
+  backoff already retries that (and only before any text has been streamed, so the UI never
+  sees a duplicate answer). `402` means the free allowance is spent — it is reported verbatim.
+- **JSON mode is best-effort.** The memory extractor asks for `response_format: json_object`;
+  if a free model refuses it, the provider retries that one call as plain text and parses the
+  JSON out of the reply (`extract_json`).
+- **Speech does not need OpenAI** if you keep `STT_PROVIDER=browser` / `TTS_PROVIDER=browser`
+  (the default here), which is why an exhausted OpenAI key is survivable end to end.
+- Switch back at any time by setting `LLM_PROVIDER=openai` — the OpenAI keys stay in `.env`.
+- Offline proof of the request shape (no key, no quota): `python tests/openrouter_test.py`.
+
 ---
 
 ## 4. Project layout
@@ -246,6 +288,7 @@ tor/
 │       ├── services/
 │       │   ├── llm.py        # provider-neutral facade + shared types
 │       │   ├── llm_openai.py # OpenAI chat.completions: streaming, tool deltas, retries
+│       │   ├── llm_openrouter.py # free-tier models on the same Chat Completions shape
 │       │   ├── llm_anthropic.py # optional fallback provider
 │       │   ├── persona.py    # persona.md + clock + memories → system prompt
 │       │   ├── hub.py        # WebSocket fan-out
@@ -777,6 +820,7 @@ python tests/agent_mock_test.py   # full agent loop + confirmation against a moc
 python tests/desktop_bridge_test.py  # app allowlist, approval flags, file-queue protocol
 python tests/whatsapp_test.py     # numbers, contacts, aliases, bulk import, both delivery paths, Cloud API errors
 python tests/google_contacts_test.py  # People API request shape, pagination, matching (mocked)
+python tests/openrouter_test.py   # free-model provider: request shape, SSE tool calls, 429 backoff (mocked)
 ```
 
 The frontend has one plain-script test too (Node, no bundler, no browser):

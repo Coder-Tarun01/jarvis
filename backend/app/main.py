@@ -44,7 +44,11 @@ async def lifespan(_app: FastAPI):
         "configured" if settings.llm_configured else "MISSING API KEY",
     )
     if not settings.llm_configured:
-        key_name = "OPENAI_API_KEY" if settings.provider == "openai" else "ANTHROPIC_API_KEY"
+        key_name = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+        }.get(settings.provider, "OPENAI_API_KEY")
         log.warning("%s is empty: chat will answer with a setup error.", key_name)
     if settings.auth_token in ("", "change-me-please"):
         log.warning("JARVIS_AUTH_TOKEN is still the default — set a real one in .env")

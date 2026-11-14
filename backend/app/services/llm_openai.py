@@ -41,6 +41,13 @@ DEFAULT_BASE_URL = "https://api.openai.com/v1"
 class OpenAIProvider:
     name = "openai"
 
+    #: Chat Completions spells the output cap differently per vendor.
+    token_field = "max_completion_tokens"
+    #: Used when the configured base URL is blank.
+    default_base_url = DEFAULT_BASE_URL
+    #: Env var named in the "not configured" error.
+    key_variable = "OPENAI_API_KEY"
+
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self._client: AsyncOpenAI | None = None
@@ -59,26 +66,41 @@ class OpenAIProvider:
         return self.settings.openai_model_fast or self.model
 
     @property
+    def _raw_base_url(self) -> str:
+        return (self.settings.openai_base_url or "").strip()
+
+    @property
     def base_url(self) -> str:
         """Always an absolute http(s) URL, even when OPENAI_BASE_URL is blank."""
-        raw = (self.settings.openai_base_url or "").strip()
+        raw = self._raw_base_url
         if not raw:
-            return DEFAULT_BASE_URL
+            return self.default_base_url
         if not raw.lower().startswith(("http://", "https://")):
             raw = "https://" + raw
         return raw.rstrip("/")
 
+    def _default_headers(self) -> dict[str, str] | None:
+        """Extra HTTP headers for every request (attribution, etc.)."""
+        return None
+
+    def _api_key(self) -> str:
+        return self.settings.openai_api_key
+
+    def _timeout(self) -> float:
+        return self.settings.openai_timeout
+
     def _get_client(self) -> AsyncOpenAI:
         if not self.available:
             raise LLMNotConfigured(
-                "OPENAI_API_KEY is not configured. Put it in .env and restart JARVIS."
+                f"{self.key_variable} is not configured. Put it in .env and restart JARVIS."
             )
         if self._client is None:
             self._client = AsyncOpenAI(
-                api_key=self.settings.openai_api_key,
+                api_key=self._api_key(),
                 base_url=self.base_url,
-                timeout=self.settings.openai_timeout,
+                timeout=self._timeout(),
                 max_retries=0,  # this module owns the backoff policy
+                default_headers=self._default_headers(),
             )
         return self._client
 
@@ -121,6 +143,14 @@ class OpenAIProvider:
         return messages
 
     # ------------------------------------------------------------------ request building
+    def _max_tokens_default(self) -> int:
+        return self.settings.openai_max_tokens
+
+    def _extra_payload(self) -> dict[str, Any]:
+        """Provider-specific request parameters (hooks for subclasses)."""
+        effort = (self.settings.openai_reasoning_effort or "").strip()
+        return {"reasoning_effort": effort} if effort else {}
+
     def _payload(
         self,
         *,
@@ -135,16 +165,14 @@ class OpenAIProvider:
         payload: dict[str, Any] = {
             "model": model or self.model,
             "messages": ([{"role": "system", "content": system}] if system else []) + list(messages),
-            "max_completion_tokens": int(max_tokens or self.settings.openai_max_tokens),
+            self.token_field: int(max_tokens or self._max_tokens_default()),
         }
         if stream:
             payload["stream"] = True
         if tools:
             payload["tools"] = self.format_tools(tools)
             payload["tool_choice"] = "auto"
-        effort = (self.settings.openai_reasoning_effort or "").strip()
-        if effort:
-            payload["reasoning_effort"] = effort
+        payload.update(self._extra_payload())
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         return payload
@@ -202,8 +230,8 @@ class OpenAIProvider:
                     raise
                 delay = min(20.0, 1.5 * (2 ** (attempt - 1)))
                 log.warning(
-                    "OpenAI stream failed (%s/%s): %s - retrying in %.1fs",
-                    attempt, attempts, exc, delay,
+                    "%s stream failed (%s/%s): %s - retrying in %.1fs",
+                    self.name, attempt, attempts, exc, delay,
                 )
                 await asyncio.sleep(delay)
         raise last_error or RuntimeError("OpenAI stream failed")
@@ -347,5 +375,5 @@ class OpenAIProvider:
             return (message.content or "").strip()
 
         return await retry_async(
-            call, attempts=3, label=f"openai.complete[{payload['model']}]", retry_if=is_retryable
+            call, attempts=3, label=f"{self.name}.complete[{payload['model']}]", retry_if=is_retryable
         )
